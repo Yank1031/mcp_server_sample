@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "employee-server": {
+      "command": "node",
+      "args": ["dist/index.js", "--stdio"],
+      "cwd": "/path/to/your/mcp_server_url",
+      "env": {
+        "AUTHORIZATION_TOKEN": "your-secret-token"
+      }
+    }
+  }
+}
