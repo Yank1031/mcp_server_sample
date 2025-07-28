@@ -161,10 +161,43 @@ class EmployeeMCPServer {
       });
 
       // SSE endpoint for MCP (no authentication)
-      app.get("/sse", (req, res) => {
-        console.log('SSE connection established');
-        const transport = new SSEServerTransport("/sse", res);
-        this.server.connect(transport);
+      app.get("/sse", async (req, res) => {
+        console.log('SSE connection attempt from:', req.ip);
+        
+        try {
+          // Set SSE headers properly
+          res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',  
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers': 'Cache-Control, Accept, Authorization'
+          });
+
+          // Create SSE transport
+          const transport = new SSEServerTransport("/sse", res);
+          
+          // Connect MCP server to transport
+          await this.server.connect(transport);
+          
+          console.log('MCP Server connected via SSE successfully');
+          
+          // Handle connection close
+          req.on('close', () => {
+            console.log('SSE connection closed');
+          });
+          
+          req.on('error', (error) => {
+            console.error('SSE request error:', error);
+          });
+          
+        } catch (error) {
+          console.error('SSE connection error:', error);
+          if (!res.headersSent) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            res.status(500).json({ error: 'Failed to establish SSE connection', details: errorMessage });
+          }
+        }
       });
 
       // REST API endpoints (no authentication)
