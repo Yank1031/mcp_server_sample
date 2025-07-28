@@ -10,14 +10,11 @@ import {
 import { Employee, sampleEmployees } from "./types.js";
 import express from "express";
 import cors from "cors";
-import { authenticateToken } from "./middleware.js";
-import { SimpleMCPAuth } from "./simple-auth.js";
 
 dotenv.config();
 
 class EmployeeMCPServer {
   private server: Server;
-  private auth: SimpleMCPAuth;
 
   constructor() {
     this.server = new Server(
@@ -32,7 +29,6 @@ class EmployeeMCPServer {
       }
     );
 
-    this.auth = new SimpleMCPAuth();
     this.setupHandlers();
   }
 
@@ -159,44 +155,24 @@ class EmployeeMCPServer {
       app.use(cors());
       app.use(express.json());
 
-      // Setup OAuth-compatible endpoints
-      this.auth.setupRoutes(app);
-
       // Health check endpoint
       app.get("/health", (req, res) => {
         res.json({ status: "healthy", timestamp: new Date().toISOString() });
       });
 
-      // OAuth-compatible authentication middleware
-      const bearerAuth = (req: any, res: any, next: any) => {
-        const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-          return res.status(401).json({ error: 'Authorization required', error_description: 'Bearer token required' });
-        }
-
-        const token = authHeader.substring(7);
-        const tokenData = this.auth.validateAccessToken(token);
-        
-        if (!tokenData) {
-          return res.status(401).json({ error: 'Invalid or expired access token' });
-        }
-
-        req.tokenData = tokenData;
-        next();
-      };
-
-      // SSE endpoint for MCP (with Bearer token authentication)
-      app.get("/sse", bearerAuth, (req, res) => {
+      // SSE endpoint for MCP (no authentication)
+      app.get("/sse", (req, res) => {
+        console.log('SSE connection established');
         const transport = new SSEServerTransport("/sse", res);
         this.server.connect(transport);
       });
 
-      // REST API endpoints (with Bearer token authentication)
-      app.get("/api/employees", bearerAuth, (req, res) => {
+      // REST API endpoints (no authentication)
+      app.get("/api/employees", (req, res) => {
         res.json(sampleEmployees);
       });
 
-      app.get("/api/employees/:id", bearerAuth, (req, res) => {
+      app.get("/api/employees/:id", (req, res) => {
         const id = parseInt(req.params.id);
         const employee = sampleEmployees.find((emp) => emp.id === id);
         
@@ -207,7 +183,7 @@ class EmployeeMCPServer {
         res.json(employee);
       });
 
-      app.get("/api/employees/department/:department", bearerAuth, (req, res) => {
+      app.get("/api/employees/department/:department", (req, res) => {
         const department = req.params.department;
         const employees = sampleEmployees.filter(
           (emp) => emp.department === department
