@@ -159,6 +159,7 @@ npm run dev
 ```bash
 npm run build
 ```
+*注意: このプロジェクトはJavaScriptベースのため、実際のビルド処理は不要です*
 
 ### 本番起動
 ```bash
@@ -172,7 +173,7 @@ npm start
 ## 技術スタック
 
 - **Runtime**: Node.js
-- **Language**: TypeScript
+- **Language**: JavaScript
 - **Framework**: Express.js
 - **Protocol**: MCP (Model Context Protocol)
 - **Transport**: SSE (Server-Sent Events)
