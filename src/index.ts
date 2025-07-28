@@ -192,9 +192,9 @@ class EmployeeMCPServer {
         res.json({ status: "healthy", timestamp: new Date().toISOString() });
       });
 
-      // SSE endpoint for MCP (no authentication)
+      // SSE endpoint for MCP (no authentication) - GET for stream, POST for messages
       app.get("/sse", async (req, res) => {
-        console.log('=== SSE connection requested ===');
+        console.log('=== SSE GET connection requested ===');
         console.log('IP:', req.ip);
         console.log('User-Agent:', req.headers['user-agent']);
         console.log('Query params:', req.query);
@@ -231,7 +231,7 @@ class EmployeeMCPServer {
           const timeoutId = setTimeout(() => {
             console.log('⚠️ SSE connection timeout - closing connection');
             res.end();
-          }, 30000); // 30 second timeout
+          }, 60000); // 60 second timeout
           
           // Handle connection close
           req.on('close', () => {
@@ -268,6 +268,21 @@ class EmployeeMCPServer {
           }
           return;
         }
+      });
+
+      // Handle POST requests to SSE endpoint for MCP messages
+      app.post("/sse", async (req, res) => {
+        console.log('=== SSE POST message received ===');
+        console.log('Body:', req.body);
+        console.log('Headers:', req.headers);
+        
+        // This is a placeholder - the actual message handling should be done by SSEServerTransport
+        // But we need to understand how Anthropic's MCP client sends messages
+        res.status(200).json({ 
+          message: "POST received", 
+          body: req.body,
+          timestamp: new Date().toISOString()
+        });
       });
 
       // REST API endpoints (no authentication)
