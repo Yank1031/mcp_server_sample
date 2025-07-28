@@ -36,8 +36,12 @@ class EmployeeMCPServer {
   }
 
   private setupHandlers() {
+    this.setupHandlersForServer(this.server);
+  }
+
+  private setupHandlersForServer(server: Server) {
     // ツールリストの取得
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
+    server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
         tools: [
           {
@@ -50,7 +54,7 @@ class EmployeeMCPServer {
           },
           {
             name: "get_employee_by_id",
-            description: "IDで指定した従業員の情報を取得します",
+            description: "指定されたIDの従業員情報を取得します",
             inputSchema: {
               type: "object",
               properties: {
@@ -64,7 +68,7 @@ class EmployeeMCPServer {
           },
           {
             name: "get_employees_by_department",
-            description: "部署で絞り込んだ従業員のリストを取得します",
+            description: "指定された部署の従業員リストを取得します",
             inputSchema: {
               type: "object",
               properties: {
@@ -80,8 +84,8 @@ class EmployeeMCPServer {
       };
     });
 
-    // ツールの実行
-    this.server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest) => {
+    // ツール実行
+    server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
 
       switch (name) {
@@ -95,21 +99,20 @@ class EmployeeMCPServer {
             ],
           };
 
-        case "get_employee_by_id": {
-          const id = args?.id as number;
+        case "get_employee_by_id":
+          const id = (args as any).id;
           const employee = sampleEmployees.find((emp) => emp.id === id);
-          
           if (!employee) {
             return {
               content: [
                 {
                   type: "text",
-                  text: JSON.stringify({ error: "従業員が見つかりません" }, null, 2),
+                  text: `従業員ID ${id} が見つかりません`,
                 },
               ],
+              isError: true,
             };
           }
-
           return {
             content: [
               {
@@ -118,14 +121,12 @@ class EmployeeMCPServer {
               },
             ],
           };
-        }
 
-        case "get_employees_by_department": {
-          const department = args?.department as string;
+        case "get_employees_by_department":
+          const department = (args as any).department;
           const employees = sampleEmployees.filter(
             (emp) => emp.department === department
           );
-
           return {
             content: [
               {
@@ -134,10 +135,17 @@ class EmployeeMCPServer {
               },
             ],
           };
-        }
 
         default:
-          throw new Error(`Unknown tool: ${name}`);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `未知のツール: ${name}`,
+              },
+            ],
+            isError: true,
+          };
       }
     });
   }
@@ -175,11 +183,27 @@ class EmployeeMCPServer {
         
         try {
           console.log('Creating SSEServerTransport...');
+          // Create a new server instance for each SSE connection
+          const mcpServer = new Server(
+            {
+              name: "employee-mcp-server",
+              version: "1.0.0",
+            },
+            {
+              capabilities: {
+                tools: {},
+              },
+            }
+          );
+
+          // Setup handlers for this server instance
+          this.setupHandlersForServer(mcpServer);
+          
           // Let SSEServerTransport handle headers - don't set them ourselves
           const transport = new SSEServerTransport("/sse", res);
           
           console.log('Attempting to connect MCP server...');
-          await this.server.connect(transport);
+          await mcpServer.connect(transport);
           console.log('✅ MCP Server connected successfully via SSE');
           
         } catch (error) {
