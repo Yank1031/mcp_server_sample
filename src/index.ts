@@ -173,47 +173,26 @@ class EmployeeMCPServer {
         console.log('User-Agent:', req.headers['user-agent']);
         console.log('Headers:', req.headers);
         
-        // SSE headers
-        const headers = {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Headers': 'Cache-Control, Authorization',
-          'X-Accel-Buffering': 'no'
-        };
-        
-        res.writeHead(200, headers);
-        console.log('SSE headers sent');
-
-        // Send initial connection event
-        res.write(`event: connected\ndata: {"status": "connected", "timestamp": "${new Date().toISOString()}"}\n\n`);
-        console.log('Initial connection event sent');
-
         try {
           console.log('Creating SSEServerTransport...');
+          // Let SSEServerTransport handle headers - don't set them ourselves
           const transport = new SSEServerTransport("/sse", res);
           
           console.log('Attempting to connect MCP server...');
           await this.server.connect(transport);
           console.log('✅ MCP Server connected successfully via SSE');
           
-          // Send success event
-          res.write(`event: mcp_ready\ndata: {"status": "ready", "timestamp": "${new Date().toISOString()}"}\n\n`);
-          console.log('MCP ready event sent');
-          
         } catch (error) {
           console.error('❌ SSE connection error:', error);
-          const errorData = {
-            error: error instanceof Error ? error.message : 'Unknown error',
-            timestamp: new Date().toISOString()
-          };
-          res.write(`event: error\ndata: ${JSON.stringify(errorData)}\n\n`);
           
-          // Don't end the connection immediately, give time for error to be sent
-          setTimeout(() => {
-            res.end();
-          }, 1000);
+          // Only send error response if headers haven't been sent yet
+          if (!res.headersSent) {
+            const errorData = {
+              error: error instanceof Error ? error.message : 'Unknown error',
+              timestamp: new Date().toISOString()
+            };
+            res.status(500).json({ error: 'Failed to establish SSE connection', details: errorData });
+          }
           return;
         }
 
