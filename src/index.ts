@@ -10,11 +10,13 @@ import {
 import { Employee, sampleEmployees } from "./types.js";
 import express from "express";
 import cors from "cors";
+import { SimpleMCPAuth } from "./simple-auth.js";
 
 dotenv.config();
 
 class EmployeeMCPServer {
   private server: Server;
+  private auth: SimpleMCPAuth;
 
   constructor() {
     this.server = new Server(
@@ -29,6 +31,7 @@ class EmployeeMCPServer {
       }
     );
 
+    this.auth = new SimpleMCPAuth();
     this.setupHandlers();
   }
 
@@ -155,6 +158,9 @@ class EmployeeMCPServer {
       app.use(cors());
       app.use(express.json());
 
+      // SimpleMCPAuth のルートを設定
+      this.auth.setupRoutes(app);
+
       // Health check endpoint
       app.get("/health", (req, res) => {
         res.json({ status: "healthy", timestamp: new Date().toISOString() });
@@ -162,7 +168,8 @@ class EmployeeMCPServer {
 
       // SSE endpoint for MCP (no authentication)
       app.get("/sse", async (req, res) => {
-        console.log('SSE connection attempt from:', req.ip);
+        console.log('SSE connection requested from:', req.ip);
+        console.log('User-Agent:', req.headers['user-agent']);
         
         try {
           // Set SSE headers properly
@@ -174,13 +181,20 @@ class EmployeeMCPServer {
             'Access-Control-Allow-Headers': 'Cache-Control, Accept, Authorization'
           });
 
+          console.log('SSE headers set, creating transport...');
+
           // Create SSE transport
           const transport = new SSEServerTransport("/sse", res);
+          
+          console.log('Transport created, connecting MCP server...');
           
           // Connect MCP server to transport
           await this.server.connect(transport);
           
           console.log('MCP Server connected via SSE successfully');
+
+          // Send a test event to confirm connection
+          res.write(`event: connection\ndata: {"status": "connected", "timestamp": "${new Date().toISOString()}"}\n\n`);
           
           // Handle connection close
           req.on('close', () => {
