@@ -6,6 +6,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
   CallToolRequest,
+  InitializeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { Employee, sampleEmployees } from "./types.js";
 import express from "express";
@@ -40,8 +41,24 @@ class EmployeeMCPServer {
   }
 
   private setupHandlersForServer(server: Server) {
+    // Initialize handler
+    server.setRequestHandler(InitializeRequestSchema, async (request) => {
+      console.log('🔄 MCP Initialize request received:', request.params);
+      return {
+        protocolVersion: "2024-11-05",
+        capabilities: {
+          tools: {},
+        },
+        serverInfo: {
+          name: "employee-mcp-server",
+          version: "1.0.0",
+        },
+      };
+    });
+
     // ツールリストの取得
     server.setRequestHandler(ListToolsRequestSchema, async () => {
+      console.log('📋 MCP ListTools request received');
       return {
         tools: [
           {
@@ -86,6 +103,7 @@ class EmployeeMCPServer {
 
     // ツール実行
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      console.log('🔧 MCP CallTool request received:', request.params.name);
       const { name, arguments: args } = request.params;
 
       switch (name) {
@@ -179,10 +197,11 @@ class EmployeeMCPServer {
         console.log('=== SSE connection requested ===');
         console.log('IP:', req.ip);
         console.log('User-Agent:', req.headers['user-agent']);
+        console.log('Query params:', req.query);
         console.log('Headers:', req.headers);
         
         try {
-          console.log('Creating SSEServerTransport...');
+          console.log('Creating new MCP Server instance...');
           // Create a new server instance for each SSE connection
           const mcpServer = new Server(
             {
@@ -196,9 +215,11 @@ class EmployeeMCPServer {
             }
           );
 
+          console.log('Setting up handlers for MCP Server...');
           // Setup handlers for this server instance
           this.setupHandlersForServer(mcpServer);
           
+          console.log('Creating SSEServerTransport...');
           // Let SSEServerTransport handle headers - don't set them ourselves
           const transport = new SSEServerTransport("/sse", res);
           
@@ -206,8 +227,36 @@ class EmployeeMCPServer {
           await mcpServer.connect(transport);
           console.log('✅ MCP Server connected successfully via SSE');
           
+          // Add connection timeout handling
+          const timeoutId = setTimeout(() => {
+            console.log('⚠️ SSE connection timeout - closing connection');
+            res.end();
+          }, 30000); // 30 second timeout
+          
+          // Handle connection close
+          req.on('close', () => {
+            console.log('SSE connection closed by client');
+            clearTimeout(timeoutId);
+          });
+
+          req.on('error', (error) => {
+            console.error('SSE request error:', error);
+            clearTimeout(timeoutId);
+          });
+
+          res.on('error', (error) => {
+            console.error('SSE response error:', error);
+            clearTimeout(timeoutId);
+          });
+
+          res.on('finish', () => {
+            console.log('SSE response finished');
+            clearTimeout(timeoutId);
+          });
+          
         } catch (error) {
           console.error('❌ SSE connection error:', error);
+          console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
           
           // Only send error response if headers haven't been sent yet
           if (!res.headersSent) {
@@ -219,19 +268,6 @@ class EmployeeMCPServer {
           }
           return;
         }
-
-        // Handle connection close
-        req.on('close', () => {
-          console.log('SSE connection closed by client');
-        });
-
-        req.on('error', (error) => {
-          console.error('SSE request error:', error);
-        });
-
-        res.on('error', (error) => {
-          console.error('SSE response error:', error);
-        });
       });
 
       // REST API endpoints (no authentication)
