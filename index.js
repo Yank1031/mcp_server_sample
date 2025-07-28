@@ -129,7 +129,7 @@ class SSEMCPServer {
       res.json({ status: 'healthy', timestamp: new Date().toISOString() });
     });
 
-    // SSEエンドポイント
+    // SSEエンドポイント - MCPプロトコル対応
     this.app.get('/sse', (req, res) => {
       // SSE headers設定
       res.writeHead(200, {
@@ -137,23 +137,31 @@ class SSEMCPServer {
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Cache-Control',
+        'Access-Control-Allow-Headers': 'Cache-Control, Authorization, X-Requested-With',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       });
 
       const connectionId = Date.now().toString();
       this.connections.set(connectionId, res);
 
-      // 接続確立メッセージ
-      this.sendSSEMessage(res, {
-        type: 'connection',
-        data: {
-          message: 'Connected to MCP Employee Server',
-          connectionId,
-          capabilities: {
-            tools: {},
+      // MCP初期化メッセージ
+      const initMessage = {
+        jsonrpc: '2.0',
+        method: 'initialized',
+        params: {
+          protocolVersion: '2024-11-05',
+          serverInfo: {
+            name: 'employee-server',
+            version: '1.0.0'
           },
-        },
-      });
+          capabilities: {
+            tools: {}
+          }
+        }
+      };
+
+      // SSE形式で初期化メッセージを送信
+      res.write(`data: ${JSON.stringify(initMessage)}\n\n`);
 
       // 接続が閉じられた時の処理
       req.on('close', () => {
@@ -163,61 +171,35 @@ class SSEMCPServer {
       req.on('error', () => {
         this.connections.delete(connectionId);
       });
+
+      // Keep-alive のためのハートビート（30秒間隔）
+      const heartbeat = setInterval(() => {
+        if (this.connections.has(connectionId)) {
+          res.write(`data: ${JSON.stringify({type: 'ping', timestamp: Date.now()})}\n\n`);
+        } else {
+          clearInterval(heartbeat);
+        }
+      }, 30000);
     });
 
-    // MCPリクエスト処理エンドポイント
-    this.app.post('/mcp', async (req, res) => {
+    // SSE経由でのJSONRPCメッセージ処理も追加
+    this.app.post('/sse', async (req, res) => {
       try {
         const mcpRequest = req.body;
+        const result = await this.processMCPRequest(mcpRequest);
         
-        // JSONRPCの基本検証
-        if (!mcpRequest.jsonrpc || mcpRequest.jsonrpc !== '2.0') {
-          return res.status(400).json({
-            jsonrpc: '2.0',
-            id: mcpRequest.id || null,
-            error: {
-              code: -32600,
-              message: 'Invalid Request: jsonrpc must be "2.0"',
-            },
-          });
-        }
-
-        // メソッドの処理
-        let result;
-        
-        switch (mcpRequest.method) {
-          case 'tools/list':
-            result = await this.handleListTools();
-            break;
-          
-          case 'tools/call':
-            result = await this.handleCallTool(mcpRequest.params);
-            break;
-          
-          default:
-            return res.status(400).json({
-              jsonrpc: '2.0',
-              id: mcpRequest.id,
-              error: {
-                code: -32601,
-                message: `Method not found: ${mcpRequest.method}`,
-              },
-            });
-        }
-
-        const response = {
-          jsonrpc: '2.0',
-          id: mcpRequest.id,
-          result,
-        };
-
-        // 結果をSSE経由でも送信
-        this.broadcastSSEMessage({
-          type: 'mcp_response',
-          data: response,
+        // SSE形式でレスポンスを返す
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': 'Cache-Control, Authorization, X-Requested-With, Content-Type',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
         });
 
-        res.json(response);
+        res.write(`data: ${JSON.stringify(result)}\n\n`);
+        res.end();
       } catch (error) {
         const errorResponse = {
           jsonrpc: '2.0',
@@ -228,10 +210,87 @@ class SSEMCPServer {
             data: error.message,
           },
         };
+        
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Access-Control-Allow-Origin': '*',
+        });
+        res.write(`data: ${JSON.stringify(errorResponse)}\n\n`);
+        res.end();
+      }
+    });
 
+    // MCPリクエスト処理エンドポイント
+    this.app.post('/mcp', async (req, res) => {
+      try {
+        const mcpRequest = req.body;
+        const result = await this.processMCPRequest(mcpRequest);
+        res.json(result);
+      } catch (error) {
+        const errorResponse = {
+          jsonrpc: '2.0',
+          id: req.body.id || null,
+          error: {
+            code: -32603,
+            message: 'Internal error',
+            data: error.message,
+          },
+        };
         res.status(500).json(errorResponse);
       }
     });
+  }
+
+  // MCPリクエストの共通処理関数
+  async processMCPRequest(mcpRequest) {
+    // JSONRPCの基本検証
+    if (!mcpRequest.jsonrpc || mcpRequest.jsonrpc !== '2.0') {
+      return {
+        jsonrpc: '2.0',
+        id: mcpRequest.id || null,
+        error: {
+          code: -32600,
+          message: 'Invalid Request: jsonrpc must be "2.0"',
+        },
+      };
+    }
+
+    // メソッドの処理
+    let result;
+    
+    switch (mcpRequest.method) {
+      case 'tools/list':
+        result = await this.handleListTools();
+        break;
+      
+      case 'tools/call':
+        result = await this.handleCallTool(mcpRequest.params);
+        break;
+      
+      default:
+        return {
+          jsonrpc: '2.0',
+          id: mcpRequest.id,
+          error: {
+            code: -32601,
+            message: `Method not found: ${mcpRequest.method}`,
+          },
+        };
+    }
+
+    const response = {
+      jsonrpc: '2.0',
+      id: mcpRequest.id,
+      result,
+    };
+
+    // 結果をSSE経由でも送信
+    this.broadcastSSEMessage({
+      type: 'mcp_response',
+      data: response,
+    });
+
+    return response;
   }
 
   async handleListTools() {
